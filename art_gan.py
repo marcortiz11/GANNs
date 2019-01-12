@@ -7,14 +7,14 @@ import pickle as pkl
 import matplotlib.pyplot as plt
 
 # Parameters
-DATASET_PATH = '../Impressionism/Impressionism_32'
+DATASET_PATH = '../Impressionism/Impressionism_64'
 num_steps = 2000000
 N = 20
 zdim = 100
-batch_size = 128
-image_size = [32, 32]
+batch_size = 25
+image_size = [64, 64]
 logdir = "../tensorlogs/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "/"
-saved_data = '../impressionism32.pkl'
+saved_data = '../impressionism64.pkl'
 
 
 # We define the generator
@@ -50,15 +50,16 @@ def generator(inp, z_dim, reuse=False):
         g4 = tf.contrib.layers.batch_norm(g4, epsilon=1e-5, scope='g_b4')
         g4 = tf.nn.leaky_relu(g4, 0.2)
 
-        # g5 = tf.transpose(tf.image.resize_nearest_neighbor(tf.transpose(g4, [0, 2, 3, 1]), [64, 64]), [0, 1, 2, 3])
-        # w5 = tf.get_variable('g_w5', [3, 3, g5.get_shape()[3], 64], initializer=tf.truncated_normal_initializer(stddev=0.02))
-        # g5 = tf.nn.conv2d(g5, w5, strides=[1, 1, 1, 1], padding='SAME')
-        # g5 = tf.contrib.layers.batch_norm(g5, epsilon=1e-5, scope='g_b5')
-        # g5 = tf.nn.leaky_relu(g5, 0.2)
-
-        w6 = tf.get_variable('g_w6', [3, 3, g4.get_shape()[3], 3],
+        g5 = tf.transpose(tf.image.resize_nearest_neighbor(tf.transpose(g4, [0, 2, 3, 1]), [64, 64]), [0, 1, 2, 3])
+        w5 = tf.get_variable('g_w5', [3, 3, g5.get_shape()[3], 64],
                              initializer=tf.truncated_normal_initializer(stddev=0.02))
-        g6 = tf.nn.conv2d(g4, w6, strides=[1, 1, 1, 1], padding='SAME')
+        g5 = tf.nn.conv2d(g5, w5, strides=[1, 1, 1, 1], padding='SAME')
+        g5 = tf.contrib.layers.batch_norm(g5, epsilon=1e-5, scope='g_b5')
+        g5 = tf.nn.leaky_relu(g5, 0.2)
+
+        w6 = tf.get_variable('g_w6', [3, 3, g5.get_shape()[3], 3],
+                             initializer=tf.truncated_normal_initializer(stddev=0.02))
+        g6 = tf.nn.conv2d(g5, w6, strides=[1, 1, 1, 1], padding='SAME')
         g6 = tf.nn.tanh(g6)
 
         print('generated image shape: ', g6.get_shape())
@@ -118,10 +119,12 @@ D2 = discriminator(G, reuse=True)
 
 
 # TODO: change optimizer. Adam?
-def optimizer(loss, var_list):
-    initial_learning_rate = 0.005
+def optimizer(loss, var_list, gen=False):
+    initial_learning_rate = 0.00025
+    if gen:
+        initial_learning_rate = 0.00008
     decay = 0.95
-    num_decay_steps = 1000
+    num_decay_steps = 200
     batch = tf.Variable(batch_size)
     learning_rate = tf.train.exponential_decay(
         initial_learning_rate,
@@ -156,6 +159,7 @@ d_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=D2, 
 d_loss = d_loss_real + d_loss_fake
 g_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=D2, labels=tf.ones_like(D2)))
 
+
 vars = tf.trainable_variables()
 d_params = [v for v in vars if 'd_' in v.name]
 g_params = [v for v in vars if 'g_' in v.name]
@@ -163,7 +167,7 @@ g_params = [v for v in vars if 'g_' in v.name]
 d_opt_real = optimizer(d_loss_real, d_params)
 d_opt_fake = optimizer(d_loss_fake, d_params)
 d_opt = optimizer(d_loss, d_params)
-g_opt = optimizer(g_loss, g_params)
+g_opt = optimizer(g_loss, g_params, gen=True)
 
 d_loss_record = np.zeros(num_steps)
 g_loss_record = np.zeros(num_steps)
@@ -199,11 +203,13 @@ for step in range(num_steps):
     _, _, _, dloss, dlossF, dlossR = sess.run([d_opt, d_opt_fake, d_opt_real, d_loss, d_loss_fake, d_loss_real],
                                               feed_dict={x: real_batch, z_placeholder: z_batch})
 
+    z_batch = np.random.uniform(-1, 1, size=[batch_size, zdim])
     _, gloss = sess.run([g_opt, g_loss], feed_dict={z_placeholder: z_batch})
 
-    print('Fake: ', dlossF, 'Real: ', dlossR, 'Generator: ', gloss)
+    #print('Fake: ', dlossF, 'Real: ', dlossR, 'Generator: ', gloss)
     if step % 5 == 0:
         print(step, 'Completed')
+        z_batch = np.random.uniform(-1, 1, size=[batch_size, zdim])
         summary = sess.run(sm, feed_dict={x: real_batch, z_placeholder: z_batch})
         summary_writer.add_summary(summary, step)
         # sample_image = generator(z_placeholder, zdim, reuse=True)
