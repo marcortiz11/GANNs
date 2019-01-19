@@ -8,21 +8,21 @@ import pickle as pkl
 import matplotlib.pyplot as plt
 
 # Parameters
-DATASET_PATH = '../Impressionism/Impressionism_64'
+DATASET_PATH = '../Impressionism/Impressionism_32'
+MODELS_PATH = '/home/magi/mai/ci/models'
+image_size = [128, 128]
+MODELS_PATH = os.path.join(MODELS_PATH, 'models' + str(image_size[0]) + '/')
+print(MODELS_PATH)
 num_steps = 2000000
 zdim = 100
 batch_size = 64
-image_size = [64, 64]
 logdir = "../tensorlogs/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "/"
-saved_data = '../impressionism64.pkl'
+saved_data = '../impressionism32.pkl'
 learning_rate_method = 'constant'
+resume_training = False
 
 
-# TODO: generator doesn't create good images. Discriminator always detect the fake images
-# The problem may be that the generator creates too similar images whatever is the random values 
-
-# We define the generator
-def generator(inp, reuse=False):
+def generator(inp, img_size, reuse=False):
     with tf.variable_scope('generator', reuse=reuse):
 
         # 4x4x1024
@@ -55,69 +55,108 @@ def generator(inp, reuse=False):
         g4 = tf.contrib.layers.batch_norm(g4, epsilon=1e-5, scope='g_b4')
         g4 = tf.nn.relu(g4)
 
-        # # 64x64x64
-        g5 = tf.transpose(tf.image.resize_nearest_neighbor(tf.transpose(g4, [0, 2, 3, 1]), [64, 64]), [0, 1, 2, 3])
-        w5 = tf.get_variable('g_w5', [3, 3, g5.get_shape()[3], 64],
-                             initializer=tf.truncated_normal_initializer(stddev=0.02))
-        g5 = tf.nn.conv2d(g5, w5, strides=[1, 1, 1, 1], padding='SAME')
-        g5 = tf.contrib.layers.batch_norm(g5, epsilon=1e-5, scope='g_b5')
-        g5 = tf.nn.relu(g5)
+        if img_size == 32:
+            logits = tf.layers.conv2d_transpose(g4, 3, 1, 1, 'same')
+            out = tf.tanh(logits)
 
-        # 64x64x3
-        logits = tf.layers.conv2d_transpose(g5, 3, 1, 1, 'same')
-        out = tf.tanh(logits)
+        if img_size == 64 or img_size == 128:
+            # 64x64x64
+            g5 = tf.transpose(tf.image.resize_nearest_neighbor(tf.transpose(g4, [0, 2, 3, 1]), [64, 64]), [0, 1, 2, 3])
+            w5 = tf.get_variable('g_w5', [3, 3, g5.get_shape()[3], 64],
+                                 initializer=tf.truncated_normal_initializer(stddev=0.02))
+            g5 = tf.nn.conv2d(g5, w5, strides=[1, 1, 1, 1], padding='SAME')
+            g5 = tf.contrib.layers.batch_norm(g5, epsilon=1e-5, scope='g_b5')
+            g5 = tf.nn.relu(g5)
+
+            if img_size == 64:
+                logits = tf.layers.conv2d_transpose(g5, 3, 1, 1, 'same')
+                out = tf.tanh(logits)
+            elif img_size == 128:
+                # 128x128x32
+                g6 = tf.transpose(tf.image.resize_nearest_neighbor(tf.transpose(g5, [0, 2, 3, 1]), [128, 128]), [0, 1, 2, 3])
+                w6 = tf.get_variable('g_w6', [3, 3, g6.get_shape()[3], 32],
+                                     initializer=tf.truncated_normal_initializer(stddev=0.02))
+                g6 = tf.nn.conv2d(g6, w6, strides=[1, 1, 1, 1], padding='SAME')
+                g6 = tf.contrib.layers.batch_norm(g6, epsilon=1e-5, scope='g_b6')
+                g6 = tf.nn.relu(g6)
+
+                logits = tf.layers.conv2d_transpose(g6, 3, 1, 1, 'same')
+                out = tf.tanh(logits)
+
     return out
 
 
-def discriminator(input, reuse=False, alpha=0.2, keep_prob=0.5):
+def discriminator(input, img_size, reuse=False):
     with tf.variable_scope('discriminator', reuse=reuse):
-        # Input layer is 32x32x3
+        # Input layer is HeightxWidthx3
 
         # Add noise as a mode collapse prevention
         input = input + tf.random_normal(tf.shape(input), stddev=0.05)
+        print('input size: ', input.get_shape())
 
-        # 16x16x32
+        # 16x16x32 || 32x32x32 || 64x64x32
         w1 = tf.get_variable('d_w1', [3, 3, input.get_shape()[3], 32])
         d1 = tf.nn.conv2d(input, w1, strides=[1, 2, 2, 1], padding='SAME')
         d1 = tf.nn.leaky_relu(d1, 0.2)
 
-        # 8x8x64
+        # 8x8x64 || 16x16x64 || 32x32x64
         d2 = tf.layers.conv2d(d1, 64, 3, 2, 'same', use_bias=False)
         d2 = tf.layers.batch_normalization(d2)
         d2 = tf.nn.leaky_relu(d2, 0.2)
-        #d2 = tf.layers.dropout(d2, keep_prob)
 
-        # 4x4x128
+        # 4x4x128 || 8x8x128 || 16x16x128
         d3 = tf.layers.conv2d(d2, 128, 3, 2, 'same', use_bias=False)
         d3 = tf.layers.batch_normalization(d3)
         d3 = tf.nn.leaky_relu(d3, 0.2)
-        #d3 = tf.layers.dropout(d3, keep_prob)
 
-        # 2x2x256
+        # 2x2x256 || 4x4x256 || 8x8x256
         d4 = tf.layers.conv2d(d3, 256, 3, 2, 'same', use_bias=False)
         d4 = tf.layers.batch_normalization(d4)
         d4 = tf.nn.leaky_relu(d4, 0.2)
-        #d4 = tf.layers.dropout(d4, keep_prob)
 
-        # 1x1x512
+        # 1x1x512 || 2x2x512 || 4x4x512
         d5 = tf.layers.conv2d(d4, 512, 3, 2, 'same', use_bias=False)
         d5 = tf.layers.batch_normalization(d5)
         d5 = tf.nn.leaky_relu(d5, 0.2)
-        #d5 = tf.layers.dropout(d5, keep_prob)
 
-        flat = tf.reshape(d5, [-1, np.prod(d5.get_shape().as_list()[1:])])
-        logits = tf.layers.dense(flat, 1)
-        out = tf.sigmoid(logits)
+        if img_size == 32:
+            flat = tf.reshape(d5, [-1, np.prod(d5.get_shape().as_list()[1:])])
+            logits = tf.layers.dense(flat, 1)
+            out = tf.sigmoid(logits)
+            print(d5.get_shape())
+
+        else:
+            # 1x1x1024 || 2x2x1024
+            d6 = tf.layers.conv2d(d5, 1024, 3, 2, 'same', use_bias=False)
+            d6 = tf.layers.batch_normalization(d6)
+            d6 = tf.nn.leaky_relu(d6, 0.2)
+
+            if img_size == 64:
+                print(d6.get_shape())
+                flat = tf.reshape(d6, [-1, np.prod(d6.get_shape().as_list()[1:])])
+                logits = tf.layers.dense(flat, 1)
+                out = tf.sigmoid(logits)
+
+        if img_size == 128:
+            # 1x1x2048
+            d7 = tf.layers.conv2d(d6, 2048, 3, 2, 'same', use_bias=False)
+            d7 = tf.layers.batch_normalization(d7)
+            d7 = tf.nn.leaky_relu(d7, 0.2)
+            print(d7.get_shape())
+
+            flat = tf.reshape(d7, [-1, np.prod(d7.get_shape().as_list()[1:])])
+            logits = tf.layers.dense(flat, 1)
+            out = tf.sigmoid(logits)
 
         return out, logits
 
 
 z_placeholder = tf.placeholder(tf.float32, [None, zdim])
-G = generator(z_placeholder)
+G = generator(z_placeholder, img_size=image_size[0])
 
 x = tf.placeholder(tf.float32, [None, image_size[0], image_size[1], 3])
-D1, D1_logits = discriminator(x)
-D2, D2_logits = discriminator(G, reuse=True)
+D1, D1_logits = discriminator(x, img_size=image_size[0])
+D2, D2_logits = discriminator(G, img_size=image_size[0], reuse=True)
 
 
 def optimizer(loss, var_list, gen=False, method='adaptive'):
@@ -166,7 +205,6 @@ d_loss = d_loss_real + d_loss_fake
 g_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=D2_logits, labels=tf.ones_like(D2)))
 
 vars = tf.trainable_variables()
-print(vars)
 d_params = [var for var in vars if var.name.startswith('discriminator')]
 g_params = [var for var in vars if var.name.startswith('generator')]
 
@@ -189,9 +227,15 @@ saver = tf.train.Saver()
 tf.summary.scalar('Generator_loss', g_loss)
 tf.summary.scalar('Disciminator_loss', d_loss)
 
+
 with tf.Session() as sess:
 
-    generated_images_tensor = generator(z_placeholder, reuse=True)
+    if resume_training:
+        last_checkpoint = tf.train.latest_checkpoint(MODELS_PATH)
+        print('Loading model from: ', last_checkpoint)
+        saver.restore(sess, last_checkpoint)
+
+    generated_images_tensor = generator(z_placeholder, img_size=image_size[0], reuse=True)
     tf.summary.image('Generated_images', generated_images_tensor, 10)
     tf.summary.image('Real images', x, 2)
     sm = tf.summary.merge_all()
@@ -200,8 +244,7 @@ with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
     print('Computing gan')
     step = 0
-    epoch = 0
-    while True:  # EPOCHS
+    while True:
         for real_batch in batch_gen:
             # real_batch = next(batch_gen)
             step += 1
@@ -217,9 +260,6 @@ with tf.Session() as sess:
                 print(step, 'Completed')
                 summary = sess.run(sm, feed_dict={x: real_batch, z_placeholder: z_batch})
                 summary_writer.add_summary(summary, step)
-            if step % 2000 == 0:
-                save_path = saver.save(sess, "../models/model-checkpoint_step%s.ckpt" % step)
-        epoch += 1
-        print('%i epoch finished' % epoch)
-        save_path = saver.save(sess, "../models/model-checkpoint_epoch%s.ckpt" % epoch)
-        print('Model saved in path: %s' % save_path)
+            if step % 100 == 0:
+                save_path = saver.save(sess, MODELS_PATH + "model-checkpoint_step_{}_size{}.ckpt".
+                                       format(step, image_size[0]), global_step=step)
