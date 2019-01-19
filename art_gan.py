@@ -8,16 +8,16 @@ import pickle as pkl
 import matplotlib.pyplot as plt
 
 # Parameters
-DATASET_PATH = '../Impressionism/Impressionism_32'
+image_size = [128, 128]  # Just need to change this and all the model adapts
+DATASET_PATH = '../Impressionism/Impressionism_' + str(image_size[0])
 MODELS_PATH = '/home/magi/mai/ci/models'
-image_size = [128, 128]
 MODELS_PATH = os.path.join(MODELS_PATH, 'models' + str(image_size[0]) + '/')
 print(MODELS_PATH)
 num_steps = 2000000
 zdim = 100
 batch_size = 64
 logdir = "../tensorlogs/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "/"
-saved_data = '../impressionism32.pkl'
+saved_data = '../impressionism' + str(image_size[0]) + '.pkl'
 learning_rate_method = 'constant'
 resume_training = False
 
@@ -151,14 +151,6 @@ def discriminator(input, img_size, reuse=False):
         return out, logits
 
 
-z_placeholder = tf.placeholder(tf.float32, [None, zdim])
-G = generator(z_placeholder, img_size=image_size[0])
-
-x = tf.placeholder(tf.float32, [None, image_size[0], image_size[1], 3])
-D1, D1_logits = discriminator(x, img_size=image_size[0])
-D2, D2_logits = discriminator(G, img_size=image_size[0], reuse=True)
-
-
 def optimizer(loss, var_list, gen=False, method='adaptive'):
     batch = tf.Variable(batch_size)
     if method == 'adaptive':
@@ -198,37 +190,42 @@ def batch_generator(x_data):
         yield np.array(x_batch) / 255 - 0.5
 
 
-# FIXME: the losses may be the problem
-d_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=D1_logits, labels=tf.constant(0.9)*tf.ones_like(D1)))
-d_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=D2_logits, labels=tf.zeros_like(D2)))
-d_loss = d_loss_real + d_loss_fake
-g_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=D2_logits, labels=tf.ones_like(D2)))
-
-vars = tf.trainable_variables()
-d_params = [var for var in vars if var.name.startswith('discriminator')]
-g_params = [var for var in vars if var.name.startswith('generator')]
-
-with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
-    d_opt = optimizer(d_loss, d_params, method=learning_rate_method)
-    g_opt = optimizer(g_loss, g_params, gen=True, method=learning_rate_method)
-
-if os.path.isfile(saved_data):
-    data = pkl.load(open(saved_data, 'rb'))
-else:
-    data = []
-    for dirpath, dirnames, filenames in os.walk(DATASET_PATH):
-        for file in filenames:
-            data.append(os.path.join(dirpath, file))
-    pkl.dump(data, open(saved_data, 'wb'))
-
-batch_gen = batch_generator(data)
-saver = tf.train.Saver()
-
-tf.summary.scalar('Generator_loss', g_loss)
-tf.summary.scalar('Disciminator_loss', d_loss)
-
-
 with tf.Session() as sess:
+
+    z_placeholder = tf.placeholder(tf.float32, [None, zdim])
+    G = generator(z_placeholder, img_size=image_size[0])
+
+    x = tf.placeholder(tf.float32, [None, image_size[0], image_size[1], 3])
+    D1, D1_logits = discriminator(x, img_size=image_size[0])
+    D2, D2_logits = discriminator(G, img_size=image_size[0], reuse=True)
+
+    d_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=D1_logits, labels=tf.constant(0.9)*tf.ones_like(D1)))
+    d_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=D2_logits, labels=tf.zeros_like(D2)))
+    d_loss = d_loss_real + d_loss_fake
+    g_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=D2_logits, labels=tf.ones_like(D2)))
+
+    vars = tf.trainable_variables()
+    d_params = [var for var in vars if var.name.startswith('discriminator')]
+    g_params = [var for var in vars if var.name.startswith('generator')]
+
+    with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
+        d_opt = optimizer(d_loss, d_params, method=learning_rate_method)
+        g_opt = optimizer(g_loss, g_params, gen=True, method=learning_rate_method)
+
+    if os.path.isfile(saved_data):
+        data = pkl.load(open(saved_data, 'rb'))
+    else:
+        data = []
+        for dirpath, dirnames, filenames in os.walk(DATASET_PATH):
+            for file in filenames:
+                data.append(os.path.join(dirpath, file))
+        pkl.dump(data, open(saved_data, 'wb'))
+
+    batch_gen = batch_generator(data)
+    saver = tf.train.Saver()
+
+    tf.summary.scalar('Generator_loss', g_loss)
+    tf.summary.scalar('Disciminator_loss', d_loss)
 
     if resume_training:
         last_checkpoint = tf.train.latest_checkpoint(MODELS_PATH)
@@ -241,7 +238,10 @@ with tf.Session() as sess:
     sm = tf.summary.merge_all()
     summary_writer = tf.summary.FileWriter(logdir, sess.graph)
 
-    sess.run(tf.global_variables_initializer())
+    if not resume_training:
+        sess.run(tf.global_variables_initializer())
+    else:
+        sess.run(tf.local_variables_initializer())
     print('Computing gan')
     step = 0
     while True:
