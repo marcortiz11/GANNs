@@ -55,7 +55,7 @@ def generator(inp, reuse=False):
         g4 = tf.contrib.layers.batch_norm(g4, epsilon=1e-5, scope='g_b4')
         g4 = tf.nn.relu(g4)
 
-        # 64x64x64
+        # # 64x64x64
         g5 = tf.transpose(tf.image.resize_nearest_neighbor(tf.transpose(g4, [0, 2, 3, 1]), [64, 64]), [0, 1, 2, 3])
         w5 = tf.get_variable('g_w5', [3, 3, g5.get_shape()[3], 64],
                              initializer=tf.truncated_normal_initializer(stddev=0.02))
@@ -149,12 +149,11 @@ def optimizer(loss, var_list, gen=False, method='adaptive'):
 
 
 def batch_generator(x_data):
-    for i in range(len(x_data)):
+    while True:
         x_batch = []
         for j in range(batch_size):
-            tmp = Image.open(x_data[i])
-            #tmp = tmp.resize((64, 64), PIL.Image.ANTIALIAS)
-            tmp.load()
+            index = np.random.choice(len(x_data), 1)
+            tmp = Image.open(x_data[index[0]])
             x_batch.append(np.asarray(tmp))
             tmp.close()
         yield np.array(x_batch) / 255 - 0.5
