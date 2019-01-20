@@ -4,6 +4,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy import stats
 import utils
+import time
 
 sns.set(color_codes=True)
 
@@ -16,10 +17,10 @@ First example with GANNs. Training the system to approximate a Gaussian distribu
 #Parameters
 hidden_size = 100
 num_steps = 10000
-N = 50 #batch size
-display_step = num_steps/100 #Displaying the dist. of the generator each display_step iterations
+N = 100 #batch size
+display_step = num_steps/5 #Displaying the dist. of the generator each display_step iterations
 K = 1 #Higher value makes the discriminator smarter than the generator
-
+video=0
 
 #Create a Gaussian distribution for the discriminator to learn
 class DataDistribution():
@@ -45,11 +46,15 @@ class GeneratorDistribution():
 
 #Generator
 def generator(input, hidden_size):
-	h0 = tf.nn.tanh(tf.layers.dense(input,hidden_size,name='g0'))
-	h1 = tf.nn.tanh(tf.layers.dense(h0,hidden_size,name='g1'))
+	h0 = tf.nn.softplus(tf.layers.dense(input,hidden_size,name='g0'))
+	h1 = tf.nn.softplus(tf.layers.dense(h0,hidden_size,name='g1'))
 	#h2 = tf.nn.softplus(tf.layers.dense(h1,hidden_size,name='g2'))
-	h3 = tf.layers.dense(h1,1,name='g3')
-	return h3
+	#h3 = tf.nn.softplus(tf.layers.dense(h2,hidden_size,name='g3'))
+	#h4 = tf.nn.softplus(tf.layers.dense(h3,hidden_size,name='g4'))
+	#h5 = tf.nn.softplus(tf.layers.dense(h4,hidden_size,name='g5'))
+	#h2 = tf.nn.tanh(tf.layers.dense(h1,hidden_size,name='g2'))
+	h9 = tf.layers.dense(h1,1,name='g9')
+	return h9
 
 
 #Discriminator
@@ -57,10 +62,12 @@ def discriminator(input,hidden_size):
 	h0 = tf.tanh(tf.layers.dense(input,hidden_size*2,name='d0'))
 	h1 = tf.tanh(tf.layers.dense(h0,hidden_size*2,name='d1'))
 	h2 = tf.tanh(tf.layers.dense(h1,hidden_size*2,name='d2'))
-	#h3 = tf.tanh(tf.layers.dense(h2,hidden_size*2,name='d3'))
+	h3 = tf.tanh(tf.layers.dense(h2,hidden_size*2,name='d3'))
 	#h4 = tf.tanh(tf.layers.dense(h3,hidden_size*2,name='d4'))
-	h5 = tf.sigmoid(tf.layers.dense(h2,1,name='d5'))
-	return h5
+	#h5 = tf.tanh(tf.layers.dense(h4,hidden_size*2,name='d5'))
+	#h6 = tf.tanh(tf.layers.dense(h5,hidden_size*2,name='d6'))
+	h7 = tf.sigmoid(tf.layers.dense(h3,1,name='d7'))
+	return h7
 
 
 with tf.variable_scope('G'):
@@ -78,7 +85,7 @@ loss_g = tf.reduce_mean(-tf.log(D2))
 
 
 def optimizer(loss,var_list):
-	initial_learning_rate = 0.007
+	initial_learning_rate = 0.005
 	decay = 0.95
 	num_decay_steps = 200
 	batch = tf.Variable(N)
@@ -107,7 +114,7 @@ opt_g = optimizer(loss_g,g_params)
 
 ####### TRAINING #########
 data = DataDistribution(2,2)
-random = GeneratorDistribution(5)
+random = DataDistribution(-5,10)
 
 d_loss_record = np.zeros(num_steps)
 g_loss_record = np.zeros(num_steps)
@@ -116,18 +123,20 @@ KL_div_record = np.zeros(num_steps)
 data_plot = data.sample(1000)
 random_plot = random.sample(1000)
 
-
-plt.ion()
+if video:
+	plt.figure(0)
+	plt.ion()
 #plt.plot(data_plot)
-plt.show()
+#plt.show()
 
+start = time.time()
 with tf.Session() as session:
 	tf.global_variables_initializer().run()
 	
 	for step in range(num_steps):
-		xi = data.sample(N)
-		zi = random.sample(N) 
 		for k in range(K):
+			xi = data.sample(N)
+			zi = random.sample(N) 
 			#Train K times the discriminator
 			#to make it ahead of the generator
 			d_loss_record[step],_ = session.run((loss_d,opt_d), {
@@ -136,29 +145,32 @@ with tf.Session() as session:
 			})
 		
 		#Update generator
-		#zi = random.sample(N) 
+		zi = random.sample(N) 
 		g_loss_record[step], _,dist1 = session.run((loss_g,opt_g,G),{
 			z: np.reshape(zi,(N,1))
 		})
 
-		KL_div_record[step] = utils.KL_divergence(xi,dist1.flatten())
+		KL_div_record[step] = utils.KL_divergence(xi,dist1.flatten()) 
 
 		if (step%display_step == 0):    
 			dist = session.run(G,{z:np.reshape(random_plot,(1000,1))})
 			plt.cla()
 			sns.distplot(data_plot,hist=False, rug=False)
 			sns.distplot(dist,hist=False, rug=False, color='r')
-			plt.draw()
-			plt.pause(0.1)
-		
-		
-
+			if video:			
+				plt.draw()
+				plt.pause(0.1)
+			#else:
+				#plt.show()
+	end = time.time()	
+	time = end-start
+	plt.show()
+	plt.figure(1)
+	plt.ioff()
 	#We need to print the generator and discriminator errors
 	print("Generator error:")
 	plt.plot(d_loss_record)
 	plt.plot(g_loss_record)
-	#plt.plot(KL_div_record)
-	#print(KL_div_record)
 	plt.show()
 
 	print("Generator learned distribution:")
@@ -169,4 +181,7 @@ with tf.Session() as session:
 
 	print("Similarity between the two distributions:")
 	print(KL_div_record[-1])
+
+	print("Time taken to train:")
+	print(time)
 
