@@ -8,7 +8,7 @@ import pickle as pkl
 import matplotlib.pyplot as plt
 
 # Parameters
-image_size = [128, 128]  # Just need to change this and all the model adapts
+image_size = [32, 32]  # Just need to change this and all the model adapts
 DATASET_PATH = '../Impressionism/Impressionism_' + str(image_size[0])
 MODELS_PATH = '/home/magi/mai/ci/models'
 MODELS_PATH = os.path.join(MODELS_PATH, 'models' + str(image_size[0]) + '/')
@@ -113,17 +113,18 @@ def discriminator(input, img_size, reuse=False):
         d4 = tf.layers.conv2d(d3, 256, 3, 2, 'same', use_bias=False)
         d4 = tf.layers.batch_normalization(d4)
         d4 = tf.nn.leaky_relu(d4, 0.2)
+        d4 = tf.nn.dropout(d4, 0.5)
 
         # 1x1x512 || 2x2x512 || 4x4x512
         d5 = tf.layers.conv2d(d4, 512, 3, 2, 'same', use_bias=False)
         d5 = tf.layers.batch_normalization(d5)
         d5 = tf.nn.leaky_relu(d5, 0.2)
+        d5 = tf.nn.dropout(d5, 0.5)
 
         if img_size == 32:
             flat = tf.reshape(d5, [-1, np.prod(d5.get_shape().as_list()[1:])])
             logits = tf.layers.dense(flat, 1)
             out = tf.sigmoid(logits)
-            print(d5.get_shape())
 
         else:
             # 1x1x1024 || 2x2x1024
@@ -132,7 +133,7 @@ def discriminator(input, img_size, reuse=False):
             d6 = tf.nn.leaky_relu(d6, 0.2)
 
             if img_size == 64:
-                print(d6.get_shape())
+                d6 = tf.nn.dropout(d6, 0.5)
                 flat = tf.reshape(d6, [-1, np.prod(d6.get_shape().as_list()[1:])])
                 logits = tf.layers.dense(flat, 1)
                 out = tf.sigmoid(logits)
@@ -142,7 +143,6 @@ def discriminator(input, img_size, reuse=False):
             d7 = tf.layers.conv2d(d6, 2048, 3, 2, 'same', use_bias=False)
             d7 = tf.layers.batch_normalization(d7)
             d7 = tf.nn.leaky_relu(d7, 0.2)
-            print(d7.get_shape())
 
             flat = tf.reshape(d7, [-1, np.prod(d7.get_shape().as_list()[1:])])
             logits = tf.layers.dense(flat, 1)
@@ -261,5 +261,5 @@ with tf.Session() as sess:
                 summary = sess.run(sm, feed_dict={x: real_batch, z_placeholder: z_batch})
                 summary_writer.add_summary(summary, step)
             if step % 100 == 0:
-                save_path = saver.save(sess, MODELS_PATH + "model-checkpoint_step_{}_size{}.ckpt".
+                save_path = saver.save(sess, MODELS_PATH + "drop_out_model-checkpoint_step_{}_size{}.ckpt".
                                        format(step, image_size[0]), global_step=step)
