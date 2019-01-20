@@ -125,7 +125,6 @@ def discriminator(input, img_size, reuse=False):
             flat = tf.reshape(d5, [-1, np.prod(d5.get_shape().as_list()[1:])])
             logits = tf.layers.dense(flat, 1)
             out = tf.sigmoid(logits)
-
         else:
             # 1x1x1024 || 2x2x1024
             d6 = tf.layers.conv2d(d5, 1024, 3, 2, 'same', use_bias=False)
